@@ -81,17 +81,85 @@ def extract_text(stego_image):
 def detect_lsb(image_path):
     try:
         with Image.open(image_path) as img:
+            # Ensure a consistent mode
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+
             pixels = list(img.getdata())
-            lsb_data = ''.join([str(pixel[0] & 1) for pixel in pixels[:1000]])
-            ones = lsb_data.count('1')
-            zeros = lsb_data.count('0')
-            print_info(f"LSB pattern: 1s = {ones}, 0s = {zeros}")
-            if abs(ones - zeros) < ones * 0.98:
-                print_success("Suspicious LSB manipulation detected.")
+
+            # Sample up to 2000 pixels
+            sample = pixels[:min(len(pixels), 2000)]
+
+            # Take LSBs of the red channel
+            lsb_bits = [p[0] & 1 for p in sample]
+
+            ones = sum(lsb_bits)
+            total = len(lsb_bits)
+            zeros = total - ones
+
+            if total == 0:
+                print_warning("No pixels to analyze.")
+                return
+
+            print_info(f"Sampled pixels: {total}")
+            print_info(f"LSB 1s: {ones}, LSB 0s: {zeros}")
+
+            ratio = ones / total
+            print_info(f"Ratio of 1s: {ratio:.3f}")
+
+            # 1) Almost perfectly balanced (around 50–50) → suspicious
+            if 0.45 <= ratio <= 0.55:
+                print_success(
+                    "Suspicious: LSBs look very balanced/random. Possible hidden data."
+                )
+
+            # 2) Extremely biased (almost all 0s or all 1s) → also suspicious
+            elif ratio <= 0.1 or ratio >= 0.9:
+                print_success(
+                    "Suspicious: LSBs are extremely biased. Possible artificial manipulation."
+                )
+
+            # 3) Everything else → not clearly suspicious
             else:
-                print_info("No obvious LSB hidden data found.")
+                print_info(
+                    "No obvious LSB hidden data found (heuristic only, not a guarantee)."
+                )
+
     except Exception as e:
         print_error(f"Error in detection: {e}")
+
+    try:
+        with Image.open(image_path) as img:
+            pixels = list(img.getdata())
+            
+            lsb_data = ''.join(str(pixel[0] & 1) for pixel in pixels[:1000])
+
+            ones = lsb_data.count('1')
+            zeros = lsb_data.count('0')
+            total = ones + zeros
+
+            if total == 0:
+                print_warning("No pixels to analyze.")
+                return 
+
+            print_info(f"LSB pattern: 1s = {ones}, 0s = {zeros}")
+
+            ratio = ones / total 
+
+            # Heuristic 1: very balanced -> suspicious
+            if abs(ones - zeros) < total * 0.05:
+                print_success("Suspicious LSB manipulation detected (balanced distribution).")
+
+            # Heuristic 2: extremely biased -> also suspicious
+            elif ratio <= 0.1 or ratio >= 0.9:
+                print_success("Suspicious: LSBs are extremely biased. Possible artificial manipulation.")
+
+            else:
+                print_info("No obvious LSB hidden data found (heuristic only, not a guarantee).")
+
+    except Exception as e:
+        print_error(f"Error in detection: {e}")
+
 
 def validate_image(path):
     if not os.path.exists(path):
